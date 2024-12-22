@@ -1,0 +1,95 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+type Request struct {
+	Expression string `json:"expression"`
+}
+
+type Response struct {
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func calculate(expression string) (float64, error) {
+	expression = strings.ReplaceAll(expression, " ", "")
+	terms := strings.FieldsFunc(expression, func(r rune) bool {
+		return r == '+' || r == '-' || r == '*' || r == '/'
+	})
+
+	if len(terms) == 0 {
+		return 0, fmt.Errorf("invalid expression")
+	}
+
+	var result float64
+	//var currentOp string
+
+	for i, term := range terms {
+		num, err := strconv.ParseFloat(term, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid term: %s", term)
+		}
+
+		if i == 0 {
+			result = num
+		} else {
+			op := string(expression[len(strings.Join(terms[:i], ""))])
+			switch op {
+			case "+":
+				result += num
+			case "-":
+				result -= num
+			case "*":
+				result *= num
+			case "/":
+				if num == 0 {
+					return 0, fmt.Errorf("division by zero")
+				}
+				result /= num
+			default:
+				return 0, fmt.Errorf("unknown operator: %s", op)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func calculateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	result, err := calculate(req.Expression)
+	if err != nil {
+		if err.Error() == "division by zero" {
+			http.Error(w, "{\"error\": \"Division by zero\"}", http.StatusUnprocessableEntity)
+			return
+		}
+		http.Error(w, "{\"error\": \"Expression is not valid\"}", http.StatusUnprocessableEntity)
+		return
+	}
+
+	response := Response{Result: fmt.Sprintf("%f", result)}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+func main() {
+	http.HandleFunc("/api/v1/calculate", calculateHandler)
+	http.ListenAndServe(":8080", nil)
+}
+s
